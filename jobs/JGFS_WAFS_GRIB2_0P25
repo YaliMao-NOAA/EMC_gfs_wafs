@@ -1,7 +1,7 @@
 #!/bin/sh
 
 ########################################
-# GFS AWIPS PRODUCT GENERATION
+# GFS WAFS GRIB 0P25 PRODUCT GENERATION
 ########################################
 
 date
@@ -22,12 +22,6 @@ cd $DATA
 # Output for executables
 ############################################
 export pgmout=OUTPUT.$$
-
-############################################
-# Load the UTILITIES module
-############################################
-#### module load prod_util
-#### module load grib_util
 
 ###########################################
 # Run setpdy and initialize PDY variables
@@ -56,11 +50,6 @@ export SCRIPTSgfs=$HOMEgfs/scripts
 ################################################
 # Set up the input/output directory
 ################################################
-#### if [ $envir = "prod" ] || [ $envir = "para" ] ; then
-####  export COMIN=${COMIN:-$COMROOT/${NET}/${envir}/$RUN.$PDY}
-#### else
-####   export COMIN=${COMIN:-$COMROOT/${NET}/prod/$RUN.$PDY}
-#### fi
 
 export COMIN=${COMIN:-$COMROOT/${NET}/${envir}/$RUN.$PDY/$cyc}
 export COMOUT=${COMOUT:-$COMROOT/${NET}/${envir}/${RUN}.${PDY}/$cyc}
@@ -79,7 +68,7 @@ env
 # Execute the script.
 ############################################
 export MPIRUN=${MPIRUN:-mpirun}
-${SCRIPTSgfs}/exgfs_wafs_grib2.sh.ecf
+${SCRIPTSgfs}/exgfs_wafs_grib2_0p25.sh.ecf
 export err=$?; err_chk
 
 msg="JOB $job HAS COMPLETED NORMALLY!"

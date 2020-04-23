@@ -19,6 +19,7 @@ echo "------------------------------------------------"
 echo "History: OCT 2004 - First implementation of this new script."
 echo "         Aug 2015 - Modified for Phase II"
 echo "         Dec 2015 - Modified for input model data in Grib2"
+echo "         Jan 2020 - Modified for input data on ICAO standard pressure levels"
 echo " "
 #####################################################################
 set +x
@@ -53,8 +54,9 @@ export fcsthrs000="$(printf "%03d" $(( 10#$fcsthrs )) )"
 icnt=1
 while [ $icnt -lt 1000 ]
 do
-#  if [ -s $COMIN/${RUN}.${cycle}.pgrbf$fcsthrs ]
-  if [ -s $COMIN/${RUN}.${cycle}.pgrb2.1p00.f$fcsthrs000 ]
+  master2i=$COMIN/${RUN}.${cycle}.master.grb2if${fcsthrs000}
+  wafs2i=$COMIN/${RUN}.${cycle}.wafs.grb2if${fcsthrs000}
+  if [[ -s $master2i && -s $wafs2i ]]
   then
      break
   fi
@@ -100,6 +102,8 @@ then
     echo "  "
 fi
 
+#  send to wmo/ folder
+#
 #    If we are processing fcsthrss 12-30, we have the
 #    added variable of the a  or b in the process.
 #    The other fcsthrss, the a or b  is dropped.

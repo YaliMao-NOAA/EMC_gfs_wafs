@@ -53,25 +53,21 @@ for hour in $fcsthrs_list
 do 
    if test ! -f pgrbf${hour}
    then
-#      cp $COMIN/${RUN}.${cycle}.pgrbf${hour} pgrbf${hour}
-
 #      file name and forecast hour of GFS model data in Grib2 are 3 digits
-#      export fhr3=$hour
-#      if test $fhr3 -lt 100
-#      then
-#         export fhr3="0$fhr3"
-#      fi
        fhr3="$(printf "%03d" $(( 10#$hour )) )"
 
-#      To solve Bugzilla #408: remove the dependency of grib1 files in gfs wafs job in next GFS upgrade
-#      Reason: It's not efficent if simply converting from grib2 to grib1 (costs 6 seconds with 415 records)
-#      Solution: Need to grep 'selected fields on selected levels' before CNVGRIB (costs 1 second with 92 records)
-       ln -s $COMIN/${RUN}.${cycle}.pgrb2.1p00.f$fhr3  pgrb2f${hour}
-       $WGRIB2 pgrb2f${hour} | grep -F -f $FIXgfs/grib_wafs.grb2to1.list | $WGRIB2 -i pgrb2f${hour} -grib pgrb2f${hour}.tmp
-#       on Cray, IOBUF_PARAMS has to used to speed up CNVGRIB
-#       export IOBUF_PARAMS='*:size=32M:count=4:verbose'
+#      To speed up, grep 'selected fields on selected levels' before CNVGRIB
+
+       ln -s $COMIN/${RUN}.${cycle}.wafs.grb2f${fhr3}  wafsf${hour}
+       sed -n "1,69 p" $FIXgfs/grib_wafs.grb2to1.list > wafs.list
+       $WGRIB2 wafsf${hour} | grep -F -f wafs.list | $WGRIB2 -i wafsf${hour} -grib wafsf${hour}.tmp
+
+       ln -s $COMIN/${RUN}.${cycle}.master.grb2f${fcsthrs000}  masterf${hour}
+       sed -n "70,92 p" $FIXgfs/grib_wafs.grb2to1.list > master.list
+       $WGRIB2 masterf${hour} | grep -F -f master.list | $WGRIB2 -i masterf${hour} -grib masterf${hour}.tmp
+
+       cat wafsf${hour}.tmp masterf${hour}.tmp > pgrb2f${hour}.tmp
        $CNVGRIB -g21 pgrb2f${hour}.tmp  pgrbf${hour}
-#       unset IOBUF_PARAMS
    fi
 
    for gid in 37 38 39 40 41 42 43 44;
@@ -108,7 +104,7 @@ do
 
       fi
    done
-#   rm tmpfile pgrbf${hour} pgrb2f${hour} pgrb2f${hour}.tmp
+   #rm tmpfile pgrbf${hour} pgrb2f${hour} pgrb2f${hour}.tmp
 done
 
 msg="wafs_intdsk completed normally"

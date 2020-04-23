@@ -251,6 +251,7 @@ subroutine get_grib2(pdt, pres_level, iret, fld, nx, ny, gfld_def)
     jpdt(1)  = pdt%icat   ! category 
     jpdt(2)  = pdt%iprm   ! parameter number
     jpdt(10) = pdt%ilev   ! type of level (code table 4.5)
+    if(jpdtn == 8) jpdt(27)=6
     jpdt(12) = pres_level ! level value
     !-- set grid defination template/section 3
     jgdtn    = -1  
