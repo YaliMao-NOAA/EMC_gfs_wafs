@@ -1,6 +1,6 @@
-module cb
-! ABSTRACT: This program reads 2D UPP fields and converts to CB in
-!           GRIB2
+module wafsgrib2
+! ABSTRACT: This program reads WAFS fields, change to grib2 template 5.40
+!           and relabel pressure levels to exact numbers
 !
 ! PROGRAM HISTORY LOG:
 ! 2020-04-21  Y Mao
@@ -8,6 +8,9 @@ module cb
 ! ATTRIBUTES:
 !   LANGUAGE: FORTRAN 90
 !
+  use grib_mod
+  use params
+
 ! values of product def template needed to read data from GRIB 2 file
   type pdt_t
      integer :: npdt   ! number of template 4
@@ -17,9 +20,11 @@ module cb
   end type pdt_t
 ! PDT parameters in the input GRIB2 file (template 4 number, category, parameter, type of level)
   type(pdt_t), parameter :: &
-       pdt_conv_pres_bot = pdt_t(0, 3, 0, 242), &
-       pdt_conv_pres_top = pdt_t(0, 3, 0, 243), &
-       pdt_conv_pcp_rate = pdt_t(8, 1, 196, 1)
+       pdt_cbcov = pdt_t(0, 6, 25, 10), &
+       pdt_cbbot = pdt_t(0, 3, 3, 11), &
+       pdt_cbtop = pdt_t(0, 3, 3, 12), &
+       pdt_gtg   = pdt_t(0, 19, 30, 100), &
+       pdt_icing = pdt_t(0, 19, 37, 100)
 
 ! values used to write data to GRIB 2 file
   type gparms_t
@@ -27,26 +32,26 @@ module cb
      integer :: icat   ! catogory
      integer :: iprm   ! parameter
      integer :: ilev   ! type of level (code table 4.5)
-     integer :: stat   ! TYPE OF STATISTICAL PROCESSING
      !
      integer :: ndrt   ! number of template 5
      integer :: drt2   ! Binary scale factor
      integer :: drt3   ! Decimal scale factor
      integer :: drt4   ! Number of bits to hold data
      !
-     real(kind=r_kind) :: msng   ! missing data (below surface)
      logical :: bitmap           ! whether to use bitmap for sparse data
   end type gparms_t
 
   type(gparms_t), parameter :: &
-       cbcov_gparms = gparms_t(0,6,25,10,-1,40,0,3,10,"yes"),&
-       cbbot_gparms = gparms_t(0,3,3,11,-1,40,13,5,16,"yes"),&
-       cbtop_gparms = gparms_t(0,3,3,12,-1,40,14,5,16,"yes")
+       cbcov_gparms = gparms_t(0,6,25,10,40,0,3,10,.true.),&
+       cbbot_gparms = gparms_t(0,3,3,11,40,13,5,16,.true.),&
+       cbtop_gparms = gparms_t(0,3,3,12,40,14,5,16,.true.),&
+       gtg_gparms   = gparms_t(0,19,30,100,40,0,2,8,.false.),&
+       icing_gparms = gparms_t(0,19,37,100,40,0,2,8,.false.)
 
 contains
 
 !----------------------------------------------------------------------------
-  subroutine cb_algo(gfile1, gfile2)
+  subroutine process(gfile1, gfile2)
 ! reads input data
     implicit none
     character(*), intent(in) :: gfile1,gfile2
@@ -54,69 +59,75 @@ contains
     integer :: ifl1,ifl2
 
     integer :: iret, nxy
-    type(gribfield) :: gfld,gfld1,gfld2
-    real, dimension(:,:), allocatable :: cbtop, cbbot, cbcov
-    logical*1,allocatable,target :: bmap(:)
+    type(gribfield) :: gfld,gfld1
+
+    integer, parameter :: NP=31
+    integer, parameter :: interval=25 ! every 25mb, from 100mb to 850mb
+    integer :: ilevels1(NP),ilevels2(NP), ilevel, i
 
     call getlun90(ifl1,1)
     call getlun90(ifl2,1)
 
-    print *, "CB file handles=",ifl1,ifl2
+    print *, "GRIB2 0P25 file handles=",ifl1,ifl2
 
-    ! no bit-map
-    call get_grib2(ifl1, pdt_conv_pcp_rate, 0, gfld, nxy, iret)
-    allocate(cbcov(nxy))
-    cbcov = gfld%fld
-    call cb_cover(cbcov)
+    CALL BAOPENR(ifl1,gfile1,iret)
+    if(iret/=0)print*,'cant open ',trim(gfile1)
 
-    ! with bit-map and UPP CLDRAD.f -50000.
-    call get_grib2(ifl1, pdt_conv_pres_bot, 0, gfld1, nxy, iret)
-    allocate(cbbot(nxy))
-    cbbot = gfld%fld
+    call baopenw(ifl2,gfile2,iret)
+    print*,'Opened ',ifl2,'for grib2 data  ', &
+           trim(gfile2), 'return code is ',iret
 
-    ! with bit-map and UPP CLDRAD.f -50000.
-    call get_grib2(ifl1, pdt_conv_pres_top, 0, gfld2, nxy, iret)
-    allocate(cbtop(nxy))
-    cbtop = gfld%fld
+! For icing severity and GTG turbulence, 
+! 1. Change template 5 version to 5.40, by icing_gparms and gtg_gparms
+! 2. Relabel pressure levels from reference to exact numbers
+    do i = 1, NP ! From 100mb to 850mb
+       ilevels1(i) = 100*(100+(i-1)*interval)
+       ilevels2(i) = ilevels1(i)
+       if(ilevels1(i) == 10000) ilevels2(i)=10040
+       if(ilevels1(i) == 12500) ilevels2(i)=12770
+       if(ilevels1(i) == 15000) ilevels2(i)=14750
+       if(ilevels1(i) == 17500) ilevels2(i)=17870
+       if(ilevels1(i) == 20000) ilevels2(i)=19680
+       if(ilevels1(i) == 22500) ilevels2(i)=22730
+       if(ilevels1(i) == 27500) ilevels2(i)=27450
+       if(ilevels1(i) == 30000) ilevels2(i)=30090
+       if(ilevels1(i) == 35000) ilevels2(i)=34430
+       if(ilevels1(i) == 40000) ilevels2(i)=39270
+       if(ilevels1(i) == 45000) ilevels2(i)=44650
+       if(ilevels1(i) == 50000) ilevels2(i)=50600
+       if(ilevels1(i) == 60000) ilevels2(i)=59520
+       if(ilevels1(i) == 70000) ilevels2(i)=69680
+       if(ilevels1(i) == 75000) ilevels2(i)=75260
+       if(ilevels1(i) == 80000) ilevels2(i)=81200
+       if(ilevels1(i) == 85000) ilevels2(i)=84310
+    end do
+    do i = 1, NP
+       ilevel = ilevels1(i)
+       call get_grib2(ifl1,pdt_icing,ilevel,gfld,nxy,iret)
+       ilevel = ilevels2(i)
+       call put_grib2(ifl2,icing_gparms,ilevel,gfld,gfld%ibmap,gfld%bmap,gfld%fld,iret)
+    end do
+    do i = 1, NP
+       ilevel = ilevels1(i)    
+       call get_grib2(ifl1,pdt_gtg, ilevel,gfld1,nxy,iret)
+       ilevel = ilevels2(i)
+       call put_grib2(ifl2,  gtg_gparms,ilevel,gfld,gfld1%ibmap,gfld1%bmap,gfld1%fld,iret)
+    end do
 
-    allocate(bmap(nxy))
-    bmap = .true.
+! For CB, change template 5 version to 5.40, by cbcov_gparm, cbbot_gparm, cbtop_gparm
+    call get_grib2(ifl1,pdt_cbcov,0,gfld,nxy,iret)
+    call put_grib2(ifl2,cbcov_gparms,0,gfld, gfld%ibmap,gfld%bmap,gfld%fld,iret)
 
-    where(cbcov <= 0.0)
-       bmap = .false.
-    end where
+    call get_grib2(ifl1,pdt_cbbot,0,gfld,nxy,iret)
+    call put_grib2(ifl2,cbbot_gparms,0,gfld, gfld%ibmap,gfld%bmap,gfld%fld,iret)
 
-    where(.not. gfld1%ibmap)
-       bmap = .false.
-    elsewhere(cbbot <= 0.)
-       bmap = .false.
-    end where
+    call get_grib2(ifl1,pdt_cbtop,0,gfld,nxy,iret)
+    call put_grib2(ifl2,cbtop_gparms,0,gfld, gfld%ibmap,gfld%bmap,gfld%fld,iret)
 
-    where(.not. gfld2%ibmap)
-       bmap = .false.
-    elsewhere(cbtop <= 0.)
-       bmap = .false.
-    end where
+    call BACLOSE(ifl1, iret)
+    call BACLOSE(ifl2, iret)
 
-    where(bmap)
-       where(.not. (cbtop < 400.*100. .and. &
-             cbbot - cbtop > 300.*100.))
-          bmap = .false.
-       else
-          cbbot = P2H(cbbot)
-          cbtop = P2H(cbtop)
-       end where
-    end where
-
-    call put_grib2(ifl2,cbcov_gparms,0,gfld, 0,bmap,cbcov,iret) 
-    call put_grib2(ifl2,cbbot_gparms,0,gfld1,0,bmap,cbbot,iret) 
-    call put_grib2(ifl2,cbtop_gparms,0,gfld2,0,bmap,cbtop,iret) 
-
-    deallocate(bmap)
-    deallocate(cbbot)
-    deallocate(cbtop)
-    deallocate(cbcov)
-  end subroutine cb_algo
+  end subroutine process
 
   SUBROUTINE GETLUN90(LUN,OPTN)
 !* THIS PROGRAM GETS UNIQUE LOGICAL UNIT NUMBERS FOR OPFILE
@@ -153,92 +164,6 @@ contains
     RETURN
   END SUBROUTINE GETLUN90
 
-  ELEMENTAL FUNCTION P2H(p)
-    implicit none
-    real, intent(in) :: p
-    real :: P2H
-!   To convert pressure levels (Pa) to geopotantial heights
-!   Uses ICAO standard atmosphere parameters as defined here:
-!      https://www.nen.nl/pdfpreview/preview_29424.pdf
-    real, parameter :: lapse = 0.0065
-    real, parameter :: surf_temp = 288.15
-    real, parameter :: gravity = 9.80665
-    real, parameter :: moles_dry_air = 0.02896442
-    real, parameter :: gas_const = 8.31432
-    real, parameter :: surf_pres = 1.01325e5
-    real, parameter :: power_const = (gravity * moles_dry_air) &
-                                       / (gas_const * lapse)
-    real, parameter :: strat_temp=216.65
-    real, parameter :: strat_pres=22631.7
-    real, parameter :: con_rd = 2.8705e+2      ! gas constant air
-    real, parameter :: alpha_strat = -con_rd*strat_temp/gravity
-    if(p >= strat_pres) then
-       P2H = (surf_temp/lapse)*(1-(p/surf_pres)**(1/power_const))
-    else
-       P2H = 11000. + alpha_strat * log(p/strat_pres)
-    end if
-  END FUNCTION P2H
-
-  ! Calculate CB coverage by using fuzzy logic
-  ! Evaluate membership of val in a fuzzy set fuzzy.
-  ! Assume f is in x-log scale
-  subroutine cb_cover(cbcov)
-    implicit none
-    real, intent(inout) :: cbcov
-
-    ! x - convective precipitation [1.0e6*kg/(m2s)]
-    ! y - cloud cover fraction, between 0 and 1
-    ! These are original values from Slingo (Table 1):
-    ! c = -.006 + 0.125*log(p)
-    ! x = 1.6 3.6 8.1 18.5 39.0 89.0 197.0 440.0 984.0 10000.0
-    ! y = 0.0 0.1 0.2  0.3  0.4  0.5   0.6   0.7   0.8     0.8
-    integer, parameter :: NP=10
-    real, parameter :: x(NP) = &
-         (/ 1.6,3.6,8.1,18.5,39.0,89.0,197.0,440.0,984.0,10000.0 /)   
-    real, parameter :: y(NP) = &
-         (/ 0.0,0.1,0.2, 0.3, 0.4, 0.5,  0.6,  0.7,  0.8,    0.8 /)
-    real, xlog(NP)
-
-    xlog = log(x)
-
-    where(cbcov <= 0. )
-       cbcov = 0.0
-    elsewhere
-       cbcov = fuzzy_member(NP,xlog,y,log(1.0e6*cbcov))
-    end where
-  end subroutine cb_cover
-
-  elemental function fuzzy_member(NP,x,y,val)
-    real :: fuzzy_member
-    integer,intent(in)::NP
-    real,intent(in) :: x(NP)
-    real,intent(in) :: y(NP)
-    real,intent(in) :: val
-
-    integer :: i
-    real :: delta, mem
-
-    if (val <= x(1)) then
-        mem = 0.0
-    else if (val >= x(NP)) then
-        mem = 0.0
-    else
-        do i = 2, NP
-            if (val < x(i)) then
-                delta = x(i) -  x(i-1)
-                if (delta <= 0.0) then
-                    mem = y(i-1)
-                else
-                    mem = y(i) * (val-x(i-1)) + &
-                          y(i-1) * (x(i)-val)) / delta
-                end if
-                exit
-            end if
-        end do
-    end if
-    fuzzy_member = mem
-  end function fuzzy_member
-
 !----------------------------------------------------------------------------
   subroutine get_grib2(iunit,pdt, pres_level, gfld, nxy, iret)
     implicit none
@@ -273,21 +198,26 @@ contains
     if(jpdtn == 8) then
        do i = 1, 6 ! Bucket precip accumulation time up to 6 hour
           jpdt(27) = i
-          call getgb2(glob_lu_in, 0, j, jdisc, jids, jpdtn, jpdt, &
+          call getgb2(iunit, 0, j, jdisc, jids, jpdtn, jpdt, &
                jgdtn, jgdt, unpack, j, gfld, iret)
           if( iret == 0) then
-             print *,'call get_grib2, iret=',iret, pdt,"at bucket accumulation time=",i
+             nxy = gfld%igdtmpl(8) * gfld%igdtmpl(9)
+             gfld%ipdtmpl(9)=gfld%ipdtmpl(9)+i
+             print *, "nxy=",nxy,"at bucket accumulation time=",i
              exit
+          else
+             print *,'call get_grib2, iret=',iret, pdt
           endif
        end do
     else
-       call getgb2(glob_lu_in, 0, j, jdisc, jids, jpdtn, jpdt, &
+       call getgb2(iunit, 0, j, jdisc, jids, jpdtn, jpdt, &
             jgdtn, jgdt, unpack, j, gfld, iret)
        if( iret /= 0) then
           print *,'call get_grib2, iret=',iret, pdt,"on level=",pres_level 
+       else
+          nxy = gfld%igdtmpl(8) * gfld%igdtmpl(9)
        endif
     end if
-    nxy = gfld%igdtmpl(8) * gfld%igdtmpl(9)
 
   end subroutine get_grib2
 
@@ -301,7 +231,7 @@ contains
     integer, intent(in) :: nlevel          ! pressure level in Pa, integer
     type(gribfield), intent(in) :: gfld    ! a sample input carrying information
     integer, intent(in) :: ibmap ! indicator whether to use bitmap
-    logical, intent(in) :: bmap(:)
+    logical*1, intent(in) :: bmap(:)
     real(4), intent(in) :: fld(:)     ! the data to be written
     integer, intent(out) :: iret           ! return status code  
 
@@ -360,14 +290,7 @@ contains
 ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 !  ADD DATA FIELD TO GRIB2 MESSAGE
     ! template 4
-    if( parms%npdt == 0 .or. parms%npdt == 7) then
-       allocate(ipdtmpl(15))
-    else
-       allocate(ipdtmpl(18))
-       ipdtmpl(16) = parms%stat
-       ipdtmpl(17) = 3
-       ipdtmpl(18) = 1
-    endif
+    allocate(ipdtmpl(15))
     ipdtmpl(1:15) = gfld%ipdtmpl(1:15)
     ipdtmpl(1)    = parms%icat
     ipdtmpl(2)    = parms%iprm
@@ -403,11 +326,11 @@ contains
     RETURN
   end subroutine put_grib2
 
-end module cb
+end module wafsgrib2
 
 program main
 
-  use cb
+  use wafsgrib2
 
   implicit none
 
@@ -421,15 +344,15 @@ program main
 !  GET ARGUMENTS
   NARG=IARGC()
   IF(NARG /= 2) THEN
-     CALL ERRMSG('cb_algo:  Incorrect usage')
-     CALL ERRMSG('Usage: wafs_grib2_cb0p25 grib2file1 grib2file2')
+     CALL ERRMSG('wafs_grib2_0p25:  Incorrect usage')
+     CALL ERRMSG('Usage: wafs_grib2_0p25 grib2file1 grib2file2')
      CALL ERREXIT(2)
   ENDIF
 
   CALL GETARG(1,gfile1)
   CALL GETARG(2,gfile2)
 
-  call cb_algo(trim(gfile1),trim(gfile2))
+  call process(trim(gfile1),trim(gfile2))
 
 end program main
 

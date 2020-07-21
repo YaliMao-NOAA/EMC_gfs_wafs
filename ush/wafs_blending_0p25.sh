@@ -28,11 +28,11 @@ if [ $SEND_US_WAFS = "NO" ] ; then
 
   # pick up US data
 
-  cp ${COMINus}/gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2 .
+  cp ${COMINus}/gfs.t${cyc}z.wafs_0p25_unblended_wifs.f${ffhr}.grib2 .
 
   # run blending code
   startmsg
-  $EXECgfs/wafs_blending_0p25 gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2 \
+  $EXECgfs/wafs_blending_0p25 gfs.t${cyc}z.wafs_0p25_unblended_wifs.f${ffhr}.grib2 \
                               EGRR_WAFS_0p25_unblended_${PDY}_${cyc}z_t${ffhr}.grib2 \
                               0p25_blended_${PDY}${cyc}f${ffhr}.grib2 > f${ffhr}.out
 
@@ -65,17 +65,17 @@ if [ $SEND_US_WAFS = "YES" ] ; then
  #
  #   Distribute US WAFS unblend Data to NCEP FTP Server (WOC) and TOC
  #
-   echo "altering the unblended US WAFS products - $COMOUT/gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2 "
-   echo "and $COMOUT/gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2.idx "
-   echo "and $PCOM/gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2 "
+   echo "altering the unblended US WAFS products - $COMOUT/gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2 "
+   echo "and $COMOUT/gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2.idx "
+   echo "and $PCOM/gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2 "
 
    if [ $SENDDBN = "YES" -a $SEND_US_WAFS = "YES" ] ; then
-      $DBNROOT/bin/dbn_alert MODEL GFS_WAFSA_GB2 $job $COMOUT/gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2
-      $DBNROOT/bin/dbn_alert MODEL GFS_WAFSA_GB2_WIDX $job $COMOUT/gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2.idx
+      $DBNROOT/bin/dbn_alert MODEL GFS_WAFSA_GB2 $job $COMOUT/gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2
+      $DBNROOT/bin/dbn_alert MODEL GFS_WAFSA_GB2_WIDX $job $COMOUT/gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2.idx
    fi
 
    if [ $SENDDBN_NTC = "YES" -a $SEND_US_WAFS = "YES" ] ; then
-      $DBNROOT/bin/dbn_alert NTC_LOW $NET $job $PCOM/gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2
+      $DBNROOT/bin/dbn_alert NTC_LOW $NET $job $PCOM/gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2
    fi
    export SEND_US_WAFS=NO
    exit

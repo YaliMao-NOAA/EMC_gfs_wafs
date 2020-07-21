@@ -17,14 +17,23 @@ module blending
 ! ATTRIBUTES:
 !   LANGUAGE: FORTRAN 90
 !
+! No bit-map will be used for blended output
 !
-! Precedures:
+! Turbulence blending:
+! Max of UK US
+!
+! Icing severity blending:
 ! 0. Select pressures
 ! 1. Max of UK US
 ! 2. Blend by Gaussian Kernel Filter (sigma=1)
 ! 3. Keep the original matching data
 ! 4. Re-categorize by different thresholds
 ! 5. Not greater than max, and not smaller than min of US and UK
+!
+! CB blending:
+! 1. extent: average
+! 2. base: min
+! 3. top: max
 
 contains
 
@@ -54,8 +63,9 @@ contains
     integer :: jpdtn,jgdtn
     type(gribfield) :: gfld,gfld2
     real, allocatable :: usdata(:,:),ukdata(:,:),blddata(:)
-    logical*1,allocatable,target :: bldbmap(:)
     real :: missing
+    character(3) :: whichblnd
+    logical :: exclusive
     real :: fldmax,fldmin,sum
 
     unpack=.true.
@@ -120,15 +130,39 @@ contains
           endif
 
           ! specify missing data values for different fields
-          ! don't process fields other than icing and turublence
-          if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==37)then  ! ICESEV
+          ! don't process fields other than icing, turublence, and CB
+          ! 1. For icing severity and GTG, max of UK US
+          ! 2. For CB top, max of US UK
+          ! 3. For CB base, min of US UK
+          ! 4. For CB extent, average of US UK
+          if(     gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==37)then  ! ICESEV
              missing=255.0
+             whichblnd='max'
+             exclusive=.true.
           else if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==30)then  ! EDPARM
              missing=255.0
+             whichblnd='max'
+             exclusive=.true.
           else if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==29)then  ! CATEDR   
              missing=255.0
+             whichblnd='max'
+             exclusive=.true.
           else if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==28)then  ! MWTURB
              missing=255.0
+             whichblnd='max'
+             exclusive=.true.
+          else if(gfld%ipdtmpl(1)== 6 .and. gfld%ipdtmpl(2)==25)then  ! CB extent
+             missing=-0.1
+             whichblnd='avg'
+             exclusive=.false.
+          else if(gfld%ipdtmpl(2)== 3 .and. gfld%ipdtmpl(10)==11)then  ! CB base
+             missing=-1
+             whichblnd='min'
+             exclusive=.false.
+          else if(gfld%ipdtmpl(2)== 3 .and. gfld%ipdtmpl(10)==12)then  ! CB top
+             missing=-1
+             whichblnd='max'
+             exclusive=.false.
           else
              cycle
           end if
@@ -206,26 +240,24 @@ contains
 
           jgdtn=gfld%igdtnum
           jgdt=-9999
-          jgdt(1)=gfld%igdtmpl(1)
+!          jgdt(1)=gfld%igdtmpl(1)
           jgdt(8)=gfld%igdtmpl(8)
           jgdt(9)=gfld%igdtmpl(9)
           print*,'jgdtn,jgdt= ',jgdtn,jgdt(1:9)
           call getgb2(ifl2,0,0,listsec0(1),jids,jpdtn,jpdt, &
                gfld%igdtnum,jgdt,.TRUE.,k,gfld2,ierr)
-          print*,'US and UK dimensions= ',gfld%ndpts,gfld2%ndpts
+          print*,'US and UK dimensions= ',gfld%ndpts,gfld2%ndpts,"ierr=",ierr
 
           im=gfld%igdtmpl(8)
           jm=gfld%igdtmpl(9)
           allocate(blddata(im*jm))
-          allocate(bldbmap(im*jm))
-          bldbmap = .true.
 
           if_ierr: if(ierr==0)then
 	   
              allocate(usdata(im,jm))
              allocate(ukdata(im,jm))
              do j=1,jm
-                if(gfld%igdtmpl(19) == gfld2%igdtmpl(19)) then
+                if(gfld%igdtmpl(12) == gfld2%igdtmpl(12)) then ! for template 3.0
                    jj=j
                 else
                    jj=jm-j+1  ! UK data is from south to north while US data from north to south
@@ -236,31 +268,13 @@ contains
 
                    ij=(j-1)*im+i
 
-                   ! 1. Max of UK US. For both icing severity and GTG
-                   if(gfld%ibmap == 255 .and. gfld2%ibmap == 255) then ! A bit map does not apply to this product.
-                      blddata(ij)=max(usdata(i,j),ukdata(i,j))
-                   elseif(gfld%ibmap /= 255 .and. gfld2%ibmap == 255) then
-                      if(.not. gfld%bmap(ij)) then
-                         blddata(ij)=missing
-                         bldbmap(ij)=.false.
-                      else
-                         blddata(ij)=max(usdata(i,j),ukdata(i,j))
-                      end if
-                   elseif(gfld%ibmap == 255 .and. gfld2%ibmap /= 255) then
-                      if(.not. gfld2%bmap(ij)) then
-                         blddata(ij)=missing
-                         bldbmap(ij)=.false.
-                      else
-                         blddata(ij)=max(usdata(i,j),ukdata(i,j))
-                      end if
-                   else
-                      if((.not. gfld%bmap(ij)) .or. (.not. gfld2%bmap(ij)) ) then
-                         blddata(ij)=missing
-                         bldbmap(ij)=.false.
-                      else ! both indicates values
-                         blddata(ij)=max(usdata(i,j),ukdata(i,j))
-                      end if
+                   if(gfld%ibmap /= 255) then !If US with BIT-MAP
+                      if(.not. gfld%bmap(ij)) usdata(i,j)=missing
+                   endif
+                   if(gfld2%ibmap /= 255) then !If UK with BIT-MAP
+                      if(.not. gfld2%bmap(ij)) ukdata(i,j)=missing
                    end if
+                   blddata(ij)=generalblending(whichblnd,missing,exclusive,usdata(i,j),ukdata(i,j))
                 end do
              end do
 
@@ -269,14 +283,14 @@ contains
 
              ! Icing severity needs more processes.
              if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==37)then  ! ICESEV
-                ! 2. Blend by Gaussian Kernel Filter
+                ! 1. Blend by Gaussian Kernel Filter
                 call gaussian_smooth(0,im,jm,1,1,missing,blddata)
                 do j=1,jm
                    do i=1,im
                       ij=(j-1)*im+i
-                      ! 3. Keep the original matching data
+                      ! 2. Keep the original matching data
                       if(usdata(i,j) == ukdata(i,j)) blddata(ij)=usdata(i,j)
-                      ! 4. Re-categorize by different thresholds
+                      ! 3. Re-categorize by different thresholds
                       if(abs(blddata(ij)-missing)<=EPSILON) cycle
                       if(blddata(ij) <= 0.8) then
                          blddata(ij) = 0.
@@ -289,7 +303,7 @@ contains
                       else
                          blddata(ij) = 4.
                       end if
-                      ! 5. Not greater than max, and not smaller than min of US and UK
+                      ! 4. Not greater than max, and not smaller than min of US and UK
                       blddata(ij)=min(blddata(ij),max(usdata(i,j),ukdata(i,j)))
                       blddata(ij)=max(blddata(ij),min(usdata(i,j),ukdata(i,j)))
                    end do
@@ -302,14 +316,16 @@ contains
           else
              print*,'error code= ',ierr   
              print*, pabbrev,' not found, writting US data as blended'
-             blddata = missing
-             where(gfld%bmap) blddata(:) = gfld%fld(:)
+             blddata = gfld%fld
+             if(gfld%ibmap /= 255) then
+                where(.not. gfld%bmap) blddata = missing
+             end if
           end if if_ierr
 
           ! MIN and MAX value after first step of blending.
           ! Used to set templete 5 elements
           do ij = 1, im*jm
-             if(bldbmap(ij) == .true.) then
+             if(blddata(ij) /= missing) then
                 i = ij
                 fldmin = blddata(ij)
                 fldmax = blddata(ij)
@@ -317,20 +333,20 @@ contains
              end if
           end do
           do ij = i, im*jm
-             if(bldbmap(ij) == .true.) then
+             if(blddata(ij) /= missing) then
                 if(blddata(ij) > fldmax) fldmax = blddata(ij)
                 if(blddata(ij) < fldmin) fldmin = blddata(ij)
              end if
           end do
 
           ! ngrdpts>=ndpts when bitmap is used (for underground gridpoints)
-          call write_grib2(fldmin,fldmax,gfld%ngrdpts,blddata,ifl3,listsec1,bldbmap,&
+          call write_grib2(fldmin,fldmax,gfld%ngrdpts,blddata,ifl3,listsec1,&
                            gfld%igdtnum,gfld%igdtlen,gfld%igdtmpl,&
-                           gfld%ipdtnum,gfld%ipdtlen,gfld%ipdtmpl)
+                           gfld%ipdtnum,gfld%ipdtlen,gfld%ipdtmpl,&
+                           gfld%idrtnum,gfld%idrtlen,gfld%idrtmpl)
 
           call gf_free(gfld)
           deallocate(blddata)
-          deallocate(bldbmap)
        enddo
     enddo
 
@@ -342,6 +358,35 @@ contains
     call BACLOSE(ifl3, ierr)
 
   end subroutine process
+
+! General blending of min, max or average of two values,
+! when they are not missing values
+  function generalblending(whichblnd,missing,exclusive,a,b)
+    real :: generalblending
+    character(3), intent(in) :: whichblnd
+    real, intent(in) :: missing
+    logical,intent(in) :: exclusive
+    real, intent(in) :: a, b
+
+    generalblending = missing
+    if(a == missing .or. b == missing) then
+       if(exclusive) then
+          generalblending = missing
+       elseif(a == missing) then
+          generalblending = b
+       else
+          generalblending = a
+       endif
+    else
+       if(whichblnd == 'max') then
+          generalblending = max(a,b)
+       elseif(whichblnd == 'min') then
+          generalblending = min(a,b)
+       elseif(whichblnd == 'avg') then
+          generalblending = (a+b)/2.
+       end if
+    end if
+  end function generalblending
 
 ! Abstract: smoothing a gridded field using Gaussian Kernel smoothing technique 
 !
@@ -391,6 +436,7 @@ contains
 
           do j = j1,j2
              do i = i1,i2
+                ii = i
                 if( i<1 ) then
                    if(iregion == 0 ) then
                       ii=i+IM
@@ -427,8 +473,8 @@ contains
   end subroutine gaussian_smooth
 
 
-  subroutine write_grib2(min,max,npt,fld,lunout,listsec1in,bmap,&
-       igdtnum,igdtlen,jgdt,ipdtnum,ipdtlen,jpdt)
+  subroutine write_grib2(min,max,npt,fld,lunout,listsec1in,&
+       igdtnum,igdtlen,jgdt,ipdtnum,ipdtlen,jpdt,idrtnum,idrtlen,idrtmpl)
 
 !******************************************************************
 !  prgmmr: pondeca           org: np20         date: 2006-03-03   *
@@ -456,19 +502,17 @@ contains
 ! 6. listsec1in: array of reference time (year, month, day, hour, *
 !    minutes and seconds)                                         *
 !                                                                 *
-! 7. bmap: bitmap array                                           *
+! 7. igdtnum: Grid Definition Template Number (Code Table 3.0)    *
 !                                                                 *
-! 8. igdtnum: Grid Definition Template Number (Code Table 3.0)    *
+! 8. igdtlen: length of grid template array                       *
 !                                                                 *
-! 9. igdtlen: length of grid template array                       *
+! 9. jgdt: array values of Grid Definition Template              *
 !                                                                 *
-! 10. jgdt: array values of Grid Definition Template              *
+! 10. ipdtnum: Product Definition Template Number (Code Table 4.0)*
 !                                                                 *
-! 11. ipdtnum: Product Definition Template Number (Code Table 4.0)*
+! 11. ipdtlen: length of product template array                   *
 !                                                                 *
-! 12. ipdtlen: length of product template array                   *
-!                                                                 *
-! 13. jpdt: array values of Product Definition Template           *
+! 12. jpdt: array values of Product Definition Template           *
 !                                                                 *
 ! attributes:                                                     *
 !   language: f90                                                 *
@@ -480,7 +524,6 @@ contains
     real(4), intent(in) :: fld(npt)
     integer, intent(in) :: lunout
     integer, intent(in) :: listsec1in(:)
-    logical*1,intent(in) :: bmap(npt)
 
     integer, intent(in) :: igdtnum
     integer, intent(in) :: igdtlen
@@ -490,8 +533,11 @@ contains
     integer, intent(in) :: ipdtlen
     integer, intent(in) :: jpdt(ipdtlen)
 
+    integer, intent(in) :: idrtnum
+    integer, intent(in) :: idrtlen
+    integer, intent(in) :: idrtmpl(idrtlen)
+
     integer(4), parameter :: idefnum=1
-    integer(4), parameter :: idrslen=5
 
     integer(4) :: max_bytes
 
@@ -503,9 +549,11 @@ contains
     integer(4) :: igdstmpl(igdtlen) 
     integer(4) :: ideflist(idefnum)     
     integer(4) :: ipdstmpl(ipdtlen)
-    integer(4) :: idrstmpl(idrslen)
-    integer(4) :: idrsnum,ibmap,numcoord
-      
+    integer(4) :: numcoord
+
+    integer(4) :: ibmap
+    logical*1 :: bmap(npt)
+
     character*1,allocatable :: cgrib(:)
  
     real(4) :: coordlist
@@ -561,22 +609,22 @@ contains
     call apply_template_40(jpdt,ipdstmpl)
     print*,'product template in new Grib file= ',ipdstmpl
 
-    idrsnum=0    !Data Representation Template Number ( see Code Table 5.0 )
-    call apply_template_50(min,max,jpdt(1),jpdt(2),idrstmpl)
+    ! Use US unblended template 5 information (5.40)
+!!!    idrtnum=40    !Data Representation Template Number ( see Code Table 5.0 )
+!!!    call apply_template_50(min,max,jpdt(1),jpdt(2),idrtmpl)
 
     numcoord=0
     coordlist=0. !needed for hybrid vertical coordinate
 
-    ibmap=0     ! Bitmap indicator ( see Code Table 6.0 )
-!    bmap=.false.
+    ibmap=255 ! Bitmap indicator ( see Code Table 6.0 ), WAFS Blended products do not use bit-map
 
     print *, "npt=",npt
     print *, "ipdtnum=",ipdtnum,ipdtlen,ipdstmpl
     print *, "coordlist=",coordlist,numcoord
-    print *, "idrsnum=",idrsnum,idrslen,idrstmpl
+    print *, "idrtnum=",idrtnum,idrtlen,idrtmpl
     call addfield(cgrib,max_bytes,ipdtnum,ipdstmpl,ipdtlen, &
-                  coordlist,numcoord,idrsnum,idrstmpl, &
-                  idrslen,fld,npt,ibmap,bmap,ierr)
+                  coordlist,numcoord,idrtnum,idrtmpl, &
+                  idrtlen,fld,npt,ibmap,bmap,ierr)
     print*,'addfield status=',ierr
 
 !==> finalize  GRIB message after all grids
@@ -683,6 +731,10 @@ contains
        ifield5(3) = 0
     else if (ncat==19 .and. nparm==30) then ! EDR
        ifield5(3) = 2
+    else if(ncat==3 .and. nparm==3) then ! CB base/top
+       ifield5(3) = 0
+    else if (ncat==6 .and. nparm==25) then ! Cb ext
+       ifield5(3) = 1
     else
        ifield5(3) = 2
     endif

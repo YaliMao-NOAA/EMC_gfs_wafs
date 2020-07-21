@@ -8,7 +8,7 @@
 #             grib2 files are pushed via dbnet to TOC to WAFS (ICSC).  
 #             This is a joint project of WAFC London and WAFC Washington.
 #
-#             We are processing WAFS grib2 for fcsthrs from 06 - 36 
+#             We are processing WAFS grib2 for ffhr from 06 - 36 
 #             with 3-hour time increment.
 #
 # History:  
@@ -24,34 +24,32 @@ cd $DATA
 
 set -x
 
-#for fcsthrs in 06 09 12 15 18 21 24 27 30 33 36
-for fcsthrs in 06
+export SLEEP_LOOP_MAX=`expr $SLEEP_TIME / $SLEEP_INT`
+export ffhr=$SHOUR
+while test $ffhr -le $EHOUR
 do
-
-##########################################################
-# Wait for the availability of the gfs master pgrib file
-##########################################################
+  export ffhr="$(printf "%02d" $(( 10#$ffhr )) )"
   # file name and forecast hour of GFS model data in Grib2 are 3 digits
-  export fcsthrs000="$(printf "%03d" $(( 10#$fcsthrs )) )"
+  export ffhr000="$(printf "%03d" $(( 10#$ffhr )) )"
+##########################################################
+# Wait for the availability of the gfs WAFS file
+##########################################################
 
-  # 2D data (CB)
-  master2=$COMIN/${RUN}.${cycle}.master.grb2f${fcsthrs000}
-  master2i=$COMIN/${RUN}.${cycle}.master.grb2if${fcsthrs000}
-  # 3D data (Icing, Turbulence)
-  wafs2=$COMIN/${RUN}.${cycle}.wafs.grb2f${fcsthrs000}
-  wafs2i=$COMIN/${RUN}.${cycle}.wafs.grb2if${fcsthrs000}
+  # 3D data (Icing, Turbulence) and 2D data (CB)
+  wafs2=$COMIN/${RUN}.${cycle}.wafs.grb2f${ffhr000}
+  wafs2i=$COMIN/${RUN}.${cycle}.wafs.grb2if${ffhr000}
 
   icnt=1
   while [ $icnt -lt 1000 ]
   do
-    if [[ -s $master2i && -s $wafs2i ]] ; then
+    if [[ -s $wafs2i ]] ; then
       break
     fi
 
     sleep 10
     icnt=$((icnt + 1))
     if [ $icnt -ge 180 ] ;    then
-        msg="ABORTING after 30 min of waiting for the gfs master and wafs file!"
+        msg="ABORTING after 30 min of waiting for the gfs wafs file!"
         err_exit $msg
     fi
   done
@@ -74,7 +72,7 @@ do
   echo " "
   set -x
 
-  export pgm=wafs_grib2_cb0p25
+  export pgm=wafs_grib2_0p25
 
   opt1=' -set_grib_type same -new_grid_winds earth '
   opt21=' -new_grid_interpolation bilinear  -if '
@@ -83,29 +81,26 @@ do
   opt24=' -set_bitmap 1 -set_grib_max_bits 16 '
   newgrid="latlon 0:1440:0.25 90:721:-0.25"
 
-  ###### Step 1: Collect CB related 2D fields, convert to 1/4 deg, and run CB algorithm ######
-  $WGRIB2 $master2 | grep ":PRES:convective" | $WGRIB2 -i $master2 -grib tmp_master_grb2
-
-  $WGRIB2 tmp_master_grb2 $opt1 $opt21 $opt22 $opt23 $opt24 -new_grid $newgrid tmp_master_grb2.0p25
-  rm tmp_master_grb2
-
-  startmsg
-  $MPIRUN $EXECgfs/$pgm tmp_master_grb2.0p25 tmp_master_grb2
-  export err=$?; err_chk
-
-  ###### Step 2: Collect fields of ICESEV and EDPARM, convert to 1/4 deg, and relabel back to exact pressure level  ######
+  ###### Step 1: Collect fields of EDPARM and ICESEV, convert to 1/4 deg for US stakeholders ######
   criteria=":EDPARM:|:ICESEV:|parm=37:"
-  $WGRIB2 $wafs2 | egrep $criteria | $WGRIB2 -i $wafs2 -grib tmp_wafs_grb2
+  $WGRIB2 $wafs2 | egrep $criteria | egrep -v ":70 mb:" | $WGRIB2 -i $wafs2 -grib tmp_wafs1_grb2
+  $WGRIB2 tmp_wafs1_grb2 $opt1 $opt21 $opt22 $opt23 $opt24 -new_grid $newgrid gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2
+  $WGRIB2 -s gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2 > gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2.idx
 
-  $WGRIB2 tmp_wafs_grb2 $opt1 $opt21 $opt22 $opt23 $opt24 -new_grid $newgrid tmp_wafs_grb2.0p25
-  rm tmp_wafs_grb2
+  ###### Step 2: Collect CB fields, convert to 1/4 deg  ######
+  criteria="|:CBHE:|:ICAHT:"
+  $WGRIB2 $wafs2 | egrep $criteria | $WGRIB2 -i $wafs2 -grib tmp_wafs2_grb2
+  $WGRIB2 tmp_wafs2_grb2 $opt1 $opt21 $opt22 $opt23 $opt24 -new_grid $newgrid tmp_wafs_grb2.0p25
 
+  ###### Step 3: Combine CB, EDPARM and ICESEV together for blending ######
+  cat gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2 >> tmp_wafs_grb2.0p25
+
+  ###### Step 4: Change to grib2 template 5.40 and relabel pressure levels to exact numbers  ######
   # Relabelling should be removed when UPP WAFS output on the exact pressure levels
-  # (after WAFS products at 1.25 deg retire)tmp_wafs_grb2
+  # (after WAFS products at 1.25 deg retire)
   startmsg
-  $MPIRUN $EXECgfs/wafs_relabel tmp_wafs_grb2.0p25 tmp_wafs_grb2
+  $MPIRUN $EXECgfs/$pgm tmp_wafs_grb2.0p25 tmp_0p25_exact.grb2 >> $pgmout 2> errfile
   export err=$?; err_chk
-
 # WGRIB2 set_lev doesn't work well. The output will fail on DEGRIB2 and
 # it change values of octet 30, octet 31-34 of template 4 from 0 to undefined values
 #  $WGRIB2 tmp_0p25_ref.grb2 \
@@ -128,21 +123,18 @@ do
 #      -if ":850 mb" -set_lev "843.1 mb" -fi \
 #      -grib tmp_0p25_exact.grb2
 
-  ###### Step 3: Combine CB, ICESEV and EDPARM to one file ######
-  cat tmp_wafs_grb2 tmp_master_grb2 > tmp_0p25_exact.grb2
-
-  ###### Step 4: Filter limited levels according to ICAO standard ######
+  ###### Step 5: Filter limited levels according to ICAO standard ######
   $WGRIB2 tmp_0p25_exact.grb2 | grep -F -f $FIXgfs/wafs_gfsmaster.grb2_0p25.list \
-          | $WGRIB2 -i tmp_0p25_exact.grb2 -grib gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2
-  $WGRIB2 -s gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2 > gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2.idx
+          | $WGRIB2 -i tmp_0p25_exact.grb2 -grib gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2
+  $WGRIB2 -s gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2 > gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2.idx
 
-  ###### Step 5 TOCGIB2 ######
+  ###### Step 6 TOCGIB2 ######
   . prep_step
   startmsg
-  export FORT11=gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2
+  export FORT11=gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2
   export FORT31=" "
-  export FORT51=gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2
-  $TOCGRIB2 <  $FIXgfs/grib2_gfs_wafs_wifs_f${fcsthrs}.0p25 >> $pgmout 2> errfile
+  export FORT51=gfs.t${cyc}z.wafs_0p25_unblended_wifs.f${ffhr}.grib2
+  $TOCGRIB2 <  $FIXgfs/grib2_gfs_wafs_wifs_f${ffhr}.0p25 >> $pgmout 2> errfile
   err=$?;export err ;err_chk
   echo " error from tocgrib2=",$err
 
@@ -152,13 +144,16 @@ do
    # Post Files to COM
    ##############################
 
-     mv gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2 $COMOUT/gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2
-     mv gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2.idx $COMOUT/gfs.t${cyc}z.wafs_0p25.f${fcsthrs}.grib2.idx
+     mv gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2 $COMOUT/gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2
+     mv gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2.idx $COMOUT/gfs.t${cyc}z.wafs_0p25.f${ffhr}.grib2.idx
+
+     mv gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2 $COMOUT/gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2
+     mv gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2.idx $COMOUT/gfs.t${cyc}z.wafs_0p25_unblended.f${ffhr}.grib2.idx
 
    #############################
    # Post Files to PCOM
    ##############################
-     mv gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2 $PCOM/gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2
+     mv gfs.t${cyc}z.wafs_0p25_unblended_wifs.f${ffhr}.grib2 $PCOM/gfs.t${cyc}z.wafs_0p25_unblended_wifs.f${ffhr}.grib2
   fi
 
   ######################
@@ -166,7 +161,13 @@ do
   ######################
 
   if [ $SENDDBN = "YES" ] ; then
-    $DBNROOT/bin/dbn_alert MODEL GFS_WAFSA_GB2_0P25 $job $PCOM/gfs.t${cyc}z.wafs_0p25_unblended.f${fcsthrs}.grib2
+    $DBNROOT/bin/dbn_alert MODEL GFS_WAFSA_GB2_0P25 $job $PCOM/gfs.t${cyc}z.wafs_0p25_unblended_wifs.f${ffhr}.grib2
+  fi
+
+  ffhr=`expr $ffhr + $FHINC`
+  if test $ffhr -lt 10
+  then
+      ffhr=0${ffhr}
   fi
 
 done

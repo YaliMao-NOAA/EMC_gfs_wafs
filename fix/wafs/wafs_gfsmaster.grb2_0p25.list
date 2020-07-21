@@ -19,4 +19,5 @@ parm=37:506 mb
 parm=37:595.2 mb
 parm=37:696.8 mb
 parm=37:812 mb
-PRES:convective
+CBHE:
+ICAHT:cumulonimbus

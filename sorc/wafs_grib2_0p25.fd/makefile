@@ -1,8 +1,8 @@
 SHELL=/bin/sh
 #
-SRCS = cb.f90
-OBJS = cb.o
-MODS = cb.mod
+SRCS = wafsgrib2.f90
+OBJS = wafsgrib2.o
+MODS = wafsgrib2.mod
 # Tunable parameters
 #
 # FC		Name of the fortran compiling system to use
@@ -17,7 +17,7 @@ MODS = cb.mod
 #INC = /nwprod/lib/incmod/g2_4
 #LIBS = -L/nwprod/lib -lg2_4 -lw3nco_v2.0.3_4 -lbacio_4 -ljasper -lpng -lz
 
-CMD =	wafs_grib2_cb0p25
+CMD =	wafs_grib2_0p25
 #PROFLIB =	-lprof
 
 # To perform the default compilation, use the first line

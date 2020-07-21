@@ -70,8 +70,8 @@ env
 ##############################################
 # Set up the forecast hours
 ##############################################
-export SHOUR=06
-export EHOUR=06
+export SHOUR=${SHOUR:-06}
+export EHOUR=${EHOUR:-36}
 
 export FHINC=03
 
