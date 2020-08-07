@@ -136,19 +136,19 @@ contains
           ! 3. For CB base, min of US UK
           ! 4. For CB extent, average of US UK
           if(     gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==37)then  ! ICESEV
-             missing=255.0
+             missing=-1.
              whichblnd='max'
              exclusive=.true.
           else if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==30)then  ! EDPARM
-             missing=255.0
+             missing=-0.5
              whichblnd='max'
              exclusive=.true.
           else if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==29)then  ! CATEDR   
-             missing=255.0
+             missing=-0.5
              whichblnd='max'
              exclusive=.true.
           else if(gfld%ipdtmpl(1)==19 .and. gfld%ipdtmpl(2)==28)then  ! MWTURB
-             missing=255.0
+             missing=-0.5
              whichblnd='max'
              exclusive=.true.
           else if(gfld%ipdtmpl(1)== 6 .and. gfld%ipdtmpl(2)==25)then  ! CB extent
@@ -156,11 +156,11 @@ contains
              whichblnd='avg'
              exclusive=.false.
           else if(gfld%ipdtmpl(2)== 3 .and. gfld%ipdtmpl(10)==11)then  ! CB base
-             missing=-1
+             missing=-1.
              whichblnd='min'
              exclusive=.false.
           else if(gfld%ipdtmpl(2)== 3 .and. gfld%ipdtmpl(10)==12)then  ! CB top
-             missing=-1
+             missing=-1.
              whichblnd='max'
              exclusive=.false.
           else

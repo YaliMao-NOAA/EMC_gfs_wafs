@@ -130,7 +130,7 @@ do
   else
       MPMDRUN="$MPIRUN -l --multi-prog"
   fi
-  $MPMDRUN -N 7 grib2.cmdfile
+  $MPMDRUN -N 8 grib2.cmdfile
 
   ###############################################
   ##### Use MPMD to speed up the processing #####

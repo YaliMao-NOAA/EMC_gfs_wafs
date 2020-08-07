@@ -50,7 +50,7 @@ export job=gfs_wafs_blending_0p25_${cyc}
 ### NET: gfs/para/parallel-test/nam/rap/ dump/ens/nawips/nesdis/
 export NET=gfs
 export RUN=gfs
-
+export COMPONENT=${COMPONENT:-atmos}
 
 ############################################
 # Specify versions
@@ -97,12 +97,12 @@ export DCOMROOT=/work/noaa/stmp/ymao/dcom
 ############################################
 # Define DATA PCOM, COMOUT and COMIN
 ############################################
-export COMIN=/work/noaa/stmp/ymao/gfsoutput/wafs_0p25/gfs.$PDY/$cyc
+export COMIN=/work/noaa/stmp/ymao/gfsoutput/wafs_0p25/gfs.$PDY/$cyc/$COMPONENT
 
 export COMINus=$COMIN/wmo
 export COMINuk=${COMINuk:-$DCOMROOT/prod/$PDY/wgrbbul/ukmet_wafs}
 
-export COMOUT=/work/noaa/stmp/ymao/gfsoutput/wafs_0p25/gfs.$PDY/$cyc
+export COMOUT=/work/noaa/stmp/ymao/gfsoutput/wafs_0p25/gfs.$PDY/$cyc/$COMPONENT
 
 export DATA=/work/noaa/stmp/$LOGNAME/stmp/working_wafs/$jobid
 

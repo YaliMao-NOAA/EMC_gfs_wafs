@@ -1,17 +1,14 @@
 #!/bin/sh
 
-#SBATCH -J wafs_octants
-#SBATCH -o /work/noaa/stmp/ymao/stmp/wafs_octants.o%j
-#SBATCH -e /work/noaa/stmp/ymao/stmp/wafs_octants.o%j
+#SBATCH -J gfs_wafs_blending
+#SBATCH -o /work/noaa/stmp/ymao/stmp/gfs_wafs_blending.o%j
+#SBATCH -e /work/noaa/stmp/ymao/stmp/gfs_wafs_blending.o%j
 #SBATCH -t 00:30:00
 #SBATCH -N 1
 #SBATCH -q batch
 #SBATCH -A ovp
 
-# 8 means octants
-
 set -xa
-date
 
 # specify computation resource
 export threads=1
@@ -41,12 +38,10 @@ ulimit -s1900000000
 ### envir: prod/dev/para/bkup/ges/test bkup2/ges2/para2/prod2/prd_p6
 export envir=prod
 
-export cyc=${cyc:-00}
-# 00 06 12 30 33
-export fcsthrs=36
+export cyc=${cyc:-12}
 
-# gfs_wafs for octants (8 WAFS files)
-export job=gfs_wafs_f${fcsthrs}_${cyc}
+# gfs_wafs_blending for blending icing turbulence of US and UK
+export job=gfs_wafs_blending_${cyc}
 
 ############################################
 # set NET RUN
@@ -70,7 +65,7 @@ export jobid=${job}.${pid}
 
 #export PDY=`$NDATE -24 | cut -c 1-8`
 export PDY=`cut -c 7-14 $COMROOT/date/t00z`
-export PDY=20200727
+export PDY=20200513
 
 USER=`whoami`
 
@@ -88,14 +83,28 @@ export KEEPDATA=YES
 ############################################
 # Define ROOT directories
 ############################################
+echo $COMROOT
+
+# for UK data
+#if [[ `hostname` =~ "^l" ]] ; then ! LUNA/TIDE
+#  export DCOMROOT=/gpfs/tp1/nco/ops/dcom
+#else                               ! SURGE/GYRE
+#  export DCOMROOT=/gpfs/gp1/nco/ops/dcom
+#fi
+# For canned data:
+export DCOMROOT=/work/noaa/stmp/ymao/dcom
 export NWROOT=/work/noaa/stmp/ymao/git
 
 ############################################
-# Define DATA, COMOUT and COMIN
+# Define DATA PCOM, COMOUT and COMIN
 ############################################
 
-export COMIN=/work/noaa/stmp/ymao/gfsoutput/com_post/gfs.$PDY/$cyc/$COMPONENT
+export COMIN=/work/noaa/stmp/ymao/gfsoutput/wafs_0p25/gfs.$PDY/$cyc/$COMPONENT
 export COMOUT=/work/noaa/stmp/ymao/gfsoutput/wafs_0p25/gfs.$PDY/$cyc/$COMPONENT
+export PCOM=$COMOUT/wmo
+
+export COMINus=$COMIN/wmo
+export COMINuk=${COMINuk:-$DCOMROOT/prod/$PDY/wgrbbul/ukmet_wafs}
 
 export DATA=/work/noaa/stmp/$LOGNAME/stmp/working_wafs/$jobid
 
@@ -106,81 +115,49 @@ export jlogfile=/$DATA/jlogfile.${jobid}
 ################################
 export HOMEgfs=${HOMEgfs:-${NWROOT}/EMC_wafs_fork}
 
-#############################################
+############################################
 # run the job
 #############################################
-sh $HOMEgfs/jobs/JGFS_WAFS
+export SHOUR=06
+export EHOUR=36
+export FHINC=03
 
-date
+sh $HOMEgfs/jobs/JGFS_WAFS_BLENDING
+
 exit
-
 
 #############################################
 # compare the output (optional)
 #############################################
-
-DIFFGB="/gpfs/hps3/emc/global/noscrub/Yali.Mao/git/save/bin/diffgb -x"
-
-stdpcom=/gpfs/gp1/ptmp/Yali.Mao/pcomop
-files=`ls $PCOM/` 
-for file in $files ; do 
-    $DIFFGB $PCOM/$file $stdpcom/$file > $file.diff
-done
-
-
-stdcom=/gpfs/gp2/nco/ops/com/gfs/prod/gfs.$PDY
-files=`ls $COMOUT/`
-for file in $files ; do
-    $DIFFGB $COMOUT/$file $stdcom/$file > $file.diff
-done
-
 if [ $USER = 'Yali.Mao' ] ; then
+
   # the standard data to be compared to
   stdout=/com/${NET}/$envir/${RUN}.${PDY}
-  stdout=/gpfs/hps/nco/ops/com/gfs/para/gfs.$PDY
   if [ $envir = prod ]; then
-    stdpcom=/pcom/gfs
+    stdpcom=/pcom/wafs
   else
-    stdpcom=/pcom/${envir}/gfs
+    stdpcom=/pcom/${envir}/wafs
   fi
+  stdout=/gpfs/hps/nco/ops/com/gfs/para/gfs.$PDY
 
-  for gid in 37 38 39 40 41 42 43 44 ; do
+  ffhr=$SHOUR
 
-    # comparing $COMOUT products
-    cmp $COMOUT/wafs${NET}${gid}.t${cyc}z.gribf${fcsthrs} $stdout/wafs${NET}${gid}.t${cyc}z.gribf${fcsthrs}
-    cmp $COMOUT/wafs${NET}${gid}.t${cyc}z.gribf${fcsthrs}.grib2 $stdout/wafs${NET}${gid}.t${cyc}z.gribf${fcsthrs}.grib2
+  while test $ffhr -le $EHOUR ; do
+
+    cmp $COMOUT/WAFS_blended_${PDY}${cyc}f${ffhr}.grib2 $stdout/WAFS_blended_${PDY}${cyc}f${ffhr}.grib2
 
     # $PCOM data on develop machine may be out of date, so skip the comparison
     continue
-    #stdpcom=/ptmpp2/Jiayi.Peng/data
 
-    # comparing $PCOM products
-    if [ $fcsthrs -eq 30 ] ; then
-      sets=b
-      for fhr in 12 18 24 30 ; do
-        cmp $PCOM/com.wafs${cyc}${fhr}${sets}.$job $stdpcom/com.wafs${cyc}${fhr}${sets}.$job
-	  cmp $PCOM/xtrn.wfs${NET}${cyc}${fhr}${sets}.$job $stdpcom/xtrn.wfs${NET}${cyc}${fhr}${sets}.$job
-      done
-      sets=
-      for fhr in 00 06 ; do
-        cmp $PCOM/com.wafs${cyc}${fhr}${sets}.$job $stdpcom/com.wafs${cyc}${fhr}${sets}.$job
-	  cmp $PCOM/xtrn.wfs${NET}${cyc}${fhr}${sets}.$job $stdpcom/xtrn.wfs${NET}${cyc}${fhr}${sets}.$job
-      done
-    fi
-    if [ $fcsthrs -ge 12 -a $fcsthrs -le 30 ] ; then
-      sets=a
-      cmp $PCOM/com.wafs${cyc}${fcsthrs}${sets}.$job $stdpcom/com.wafs${cyc}${fcsthrs}${sets}.$job
-      cmp $PCOM/xtrn.wfs${NET}${cyc}${fcsthrs}${sets}.$job $stdpcom/xtrn.wfs${NET}${cyc}${fcsthrs}${sets}.$job
-    elif  [ $fcsthrs -ge 36 ] ; then
-      sets=
-      cmp $PCOM/com.wafs${cyc}${fcsthrs}${sets}.$job $stdpcom/com.wafs${cyc}${fcsthrs}${sets}.$job
-      cmp $PCOM/xtrn.wfs${NET}${cyc}${fcsthrs}${sets}.$job $stdpcom/xtrn.wfs${NET}${cyc}${fcsthrs}${sets}.$job
-    # elif [ $fcsthrs -le 36 ] ; then 
-    #   no comparison
+    cmp $PCOM/grib2.t${cyc}z.WAFS_blended_f${ffhr} $stdpcom/grib2.t${cyc}z.WAFS_blended_f${ffhr}
+
+    ffhr=`expr $ffhr + $FHINC`
+    if test $ffhr -lt 10
+    then
+      ffhr=0${ffhr}
     fi
 
   done
 
 fi
-
 exit
