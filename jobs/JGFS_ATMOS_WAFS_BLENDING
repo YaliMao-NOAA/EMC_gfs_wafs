@@ -1,6 +1,6 @@
 #!/bin/sh
 ########################################################
-# This job runs the code to blend US's and UK's WAFS products at 0.25 deg 
+# This job runs the code to blend US's and UK's WAFS products 
 ########################################################
 
 date
@@ -21,6 +21,14 @@ cd $DATA
 # Output for executables
 ############################################
 export pgmout=OUTPUT.$$
+
+############################################
+# Load the UTILITIES module
+############################################
+#### module load prod_util
+#### module load grib_util
+#### module use /nwpara2/modulefiles
+#### module load util_shared/v1.0.3
 
 ###########################################
 # Run setpdy and initialize PDY variables
@@ -71,8 +79,8 @@ env
 ##############################################
 # Set up the forecast hours
 ##############################################
-export SHOUR=${SHOUR:-06}
-export EHOUR=${EHOUR:-36}
+export SHOUR=06
+export EHOUR=36
 
 export FHINC=03
 
@@ -91,9 +99,9 @@ export SLEEP_INT=10
 ####################################
 # Check if this is a restart
 ####################################
-if test -f $COMOUT/$RUN.t${cyc}z.control.wafsblending_0p25
+if test -f $COMOUT/$RUN.t${cyc}z.control.wafsblending
 then
-  modelrecvy=`cat < $COMOUT/${RUN}.t${cyc}z.control.wafsblending_0p25`
+  modelrecvy=`cat < $COMOUT/${RUN}.t${cyc}z.control.wafsblending`
   recvy_pdy=`echo $modelrecvy | cut -c1-8`
   recvy_cyc=`echo $modelrecvy | cut -c9-10`
   recvy_shour=`echo $modelrecvy | cut -c11-`
@@ -123,7 +131,7 @@ fi
 ############################################
 # Execute the script.
 ############################################
-${SCRIPTSgfs}/exgfs_wafs_blending_0p25.sh.ecf
+${SCRIPTSgfs}/exgfs_atmos_wafs_blending.sh
 export err=$?; err_chk
 
 msg="JOB $job HAS COMPLETED NORMALLY."

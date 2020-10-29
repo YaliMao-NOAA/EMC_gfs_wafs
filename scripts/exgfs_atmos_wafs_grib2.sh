@@ -1,6 +1,6 @@
 #!/bin/sh
 ######################################################################
-#  UTILITY SCRIPT NAME :  exgfs_wafs_grib2.sh.ecf
+#  UTILITY SCRIPT NAME :  exgfs_atmos_wafs_grib2.sh
 #         DATE WRITTEN :  07/15/2009
 #
 #  Abstract:  This utility script produces the WAFS GRIB2. The output 
@@ -19,7 +19,7 @@
 #                for blending at 0.25 degree
 #####################################################################
 echo "-----------------------------------------------------"
-echo "JGFS_WAFS_GRIB2 at 00Z/06Z/12Z/18Z GFS postprocessing"
+echo "JGFS_ATMOS_WAFS_GRIB2 at 00Z/06Z/12Z/18Z GFS postprocessing"
 echo "-----------------------------------------------------"
 echo "History: AUGUST  2009 - First implementation of this new script."
 echo " "
@@ -78,29 +78,11 @@ do
   echo " "
   set -x
 
-  export pgm=wafs_awc_wafavn
-
   # ===================  process master file grib2  ===================
   # 1) new WAFS fields
   cp $PARMgfs/wafs_awc_wafavn.grb2.cfg waf.cfg
 
   date
-  ################# START #######################
-  ##### Use MPMD to speed up the processing #####
-  ###############################################
-  USHREGRID=$USHgfs/wafs_grib2.regrid.sh
-
-  # 2D fields WAFS output, directly from master file
-  criteria0=":ICAHT:tropopause:|:TMP:tropopause:|:ICAHT:max.*wind:|:UGRD:max.*wind:|:VGRD:max.*wind:"
-  # 2D inputs for WAFS from master file, reference to type(pdt_t) parameters sorc/wafs_awc_wafavn.fd/waf_grib2.f90
-  criteria1=":PRES:surface:|:PRES:convective|:CPRAT:.*hour.\{1\}ave"
-  # 3D inputs from WAFS file at high resolution on ICAO standard pressures
-  criteria2=":HGT:|:TMP:"
-  criteria3=":UGRD:|:VGRD:"
-  criteria4=":RH:|:CLWMR:|:ICMR:"
-  criteria5=":RWMR:|:SNMR:|:GRLE:"
-  criteria6=":ICIP:|:EDPARM:"
-  criteria7=":CATEDR:|:MWTURB:"
 
   # For high resolution maste file, run time of awc_wafavn is 20 seconds for 1440 x 721, 
   # 3 minutes for new 3072 x 1536 master file for each forecast.
@@ -115,36 +97,62 @@ do
       regrid_options=""
   fi
 
-  echo 0 $USHREGRID 0 $master2 $criteria0 $regrid_options >> grib2.cmdfile
-  echo 1 $USHREGRID 1 $master2 $criteria1 $regrid_options >> grib2.cmdfile
-  for i in 2 3 4 5 6 7; do
+  if [ ! `echo $MPIRUN | cut -d " " -f1` = 'srun' ] ; then
+    # 2D fields WAFS output, directly from master file
+    criteria0=":ICAHT:tropopause:|:TMP:tropopause:|:ICAHT:max.*wind:|:UGRD:max.*wind:|:VGRD:max.*wind:"
+    # 2D inputs for WAFS from master file, reference to type(pdt_t) parameters sorc/wafs_awc_wafavn.fd/waf_grib2.f90
+    criteria1=":PRES:surface:|:PRES:convective|:CPRAT:.*hour.{1}ave"
+    $WGRIB2 $master2 | egrep "$criteria0|$criteria1" |  $WGRIB2 -i $master2 -grib master.fields
+    criteria=":HGT:.* mb:|:TMP:.* mb:|:UGRD:.* mb:|VGRD:.* mb:|:RH:.* mb:|:CLWMR:.* mb:|:ICIP:.* mb:"
+    $WGRIB2 $wafs2 | egrep "$criteria" |  $WGRIB2 -i $wafs2 -grib wafs.fields
+    cat master.fields wafs.fields > masterfilef${fcsthrs}.new
+    rm master.fields wafs.fields
+    $WGRIB2  masterfilef${fcsthrs}.new -set master_table 6 -new_grid_interpolation bilinear -new_grid latlon 0:1440:0.25 90:721:-0.25 masterfilef${fcsthrs}
+  else
+
+    ################# START #######################
+    ##### Use MPMD to speed up the processing #####
+    ###############################################
+    USHREGRID=$USHgfs/wafs_grib2.regrid.sh
+
+    # 2D fields WAFS output, directly from master file
+    criteria0=":ICAHT:tropopause:|:TMP:tropopause:|:ICAHT:max.*wind:|:UGRD:max.*wind:|:VGRD:max.*wind:"
+    # 2D inputs for WAFS from master file, reference to type(pdt_t) parameters sorc/wafs_awc_wafavn.fd/waf_grib2.f90
+    criteria1=":PRES:surface:|:PRES:convective|:CPRAT:.*hour.\{1\}ave"
+    # 3D inputs from WAFS file at high resolution on ICAO standard pressures
+    criteria2=":HGT:|:TMP:"
+    criteria3=":UGRD:|:VGRD:"
+    criteria4=":RH:|:CLWMR:"
+    criteria5=":ICIP:|:EDPARM:"
+    criteria6=":CATEDR:|:MWTURB:"
+
+    echo 0 $USHREGRID 0 $master2 $criteria0 $regrid_options >> grib2.cmdfile
+    echo 1 $USHREGRID 1 $master2 $criteria1 $regrid_options >> grib2.cmdfile
+    for i in 2 3 4 5 6 ; do
       criteria=`eval echo '$'criteria$i`
       echo $i $USHREGRID $i $wafs2 $criteria $regrid_options >> grib2.cmdfile
-  done
+    done
 
-  if [ ! `echo $MPIRUN | cut -d " " -f1` = 'srun' ] ; then
-      # If not 'srun' MPMD, do not need CPU number at the beginning of each line of grib2.cmdfile
-      sed 's/[^ ]* //'  -i grib2.cmdfile
-      export MP_PGMMODEL=mpmd
-      MPMDRUN=$MPIRUN
-  else
-      MPMDRUN="$MPIRUN -l --multi-prog"
-  fi
-  $MPMDRUN -N 8 grib2.cmdfile
+    MPMDRUN="$MPIRUN -l --multi-prog -N 7"
+    $MPMDRUN grib2.cmdfile
 
-  ###############################################
-  ##### Use MPMD to speed up the processing #####
-  ################### END #######################
-  date
+    ###############################################
+    ##### Use MPMD to speed up the processing #####
+    ################### END #######################
+    date
 
-  rm masterfilef${fcsthrs}
-  for i in 0 1 2 3 4 5 6 7 ; do
+    rm masterfilef${fcsthrs}
+    for i in 0 1 2 3 4 5 6 ; do
       cat regrid.tmp.$i >> masterfilef${fcsthrs}
       rm regrid.tmp.$i
-  done
+    done
+  fi
+
+  export pgm=wafs_awc_wafavn
+  . prep_step
 
   startmsg
-  $MPIRUN $EXECgfs/$pgm -c waf.cfg -i masterfilef${fcsthrs} -o tmpfile_icaof${fcsthrs} icng tcld cat cb  >> $pgmout  2> errfile
+  $MPIRUN $EXECgfs/$pgm -c waf.cfg -i masterfilef${fcsthrs} -o tmpfile_icaof${fcsthrs} icng cat cb  >> $pgmout  2> errfile
   export err=$?; err_chk
 
 # To avoid interpolation of missing value (-0.1 or -1.0, etc), use neighbor interpolation instead of bilinear interpolation
@@ -153,6 +161,8 @@ do
                       -new_grid latlon 0:288:1.25 90:145:-1.25 tmpfile_icao_grb45f${fcsthrs}
 # after grid conversion by wgrib2, even with neighbor interpolation, values may still be mislead by noises, epescially 
 # the ref_value is not zero according to DST template 5.XX. Solution: rewrite and round those special meaning values
+  export pgm=wafs_setmissing
+  . prep_step
   $MPIRUN $EXECgfs/wafs_setmissing tmpfile_icao_grb45f${fcsthrs} tmpfile_icao_grb45f${fcsthrs}.setmissing
   mv tmpfile_icao_grb45f${fcsthrs}.setmissing tmpfile_icao_grb45f${fcsthrs}
 
@@ -251,9 +261,9 @@ done
 ################################################################################
 # GOOD RUN
 set +x
-echo "**************JOB EXGFS_WAFS_GRIB2.SH.ECF COMPLETED NORMALLY ON THE IBM"
-echo "**************JOB EXGFS_WAFS_GRIB2.SH.ECF COMPLETED NORMALLY ON THE IBM"
-echo "**************JOB EXGFS_WAFS_GRIB2.SH.ECF COMPLETED NORMALLY ON THE IBM"
+echo "**************JOB EXGFS_ATMOS_WAFS_GRIB2.SH COMPLETED NORMALLY ON THE IBM"
+echo "**************JOB EXGFS_ATMOS_WAFS_GRIB2.SH COMPLETED NORMALLY ON THE IBM"
+echo "**************JOB EXGFS_ATMOS_WAFS_GRIB2.SH COMPLETED NORMALLY ON THE IBM"
 set -x
 ################################################################################
 

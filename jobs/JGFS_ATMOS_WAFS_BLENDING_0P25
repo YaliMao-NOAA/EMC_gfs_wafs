@@ -1,8 +1,7 @@
 #!/bin/sh
-
-########################################
-# GFS WAFS GRIB 0P25 PRODUCT GENERATION
-########################################
+########################################################
+# This job runs the code to blend US's and UK's WAFS products at 0.25 deg 
+########################################################
 
 date
 export PS4='$SECONDS + ' 
@@ -30,6 +29,8 @@ export cycle=t${cyc}z
 setpdy.sh
 . ./PDY
 
+export RERUN=${RERUN:-NO}
+
 ############################################
 # Set up the NET and RUN
 ############################################
@@ -38,7 +39,7 @@ export RUN=${RUN:-gfs}
 export COMPONENT=${COMPONENT:-atmos}
 
 ############################################
-# Specify HOME Directory 
+# Specify HOME Directory
 ############################################
 export gfs_ver=${gfs_ver:-v16.0.0}
 export HOMEgfs=${HOMEgfs:-${NWROOT}/gfs.${gfs_ver}}
@@ -49,9 +50,8 @@ export USHgfs=$HOMEgfs/ush
 export SCRIPTSgfs=$HOMEgfs/scripts
 
 ################################################
-# Set up the input/output directory
+# Set up the INPUT and OUTPUT directories
 ################################################
-
 export COMIN=${COMIN:-$COMROOT/${NET}/${envir}/$RUN.$PDY/$cyc/$COMPONENT}
 export COMOUT=${COMOUT:-$COMROOT/${NET}/${envir}/${RUN}.${PDY}/$cyc/$COMPONENT}
 export PCOM=${PCOM:-$COMOUT/wmo}
@@ -59,6 +59,9 @@ export PCOM=${PCOM:-$COMOUT/wmo}
 if [ $SENDCOM = YES ] ; then
   mkdir -p $COMOUT $PCOM
 fi
+
+export COMINus=${COMINus:-$COMIN}
+export COMINuk=${COMINuk:-$DCOMROOT/prod/$PDY/wgrbbul/ukmet_wafs}
 
 ############################################
 # print current environment
@@ -69,9 +72,11 @@ env
 # Set up the forecast hours
 ##############################################
 export SHOUR=${SHOUR:-06}
+# Will change to 120 for 2023 ICAO standard
+#export EHOUR=${EHOUR:-120}
 export EHOUR=${EHOUR:-36}
 
-export FHINC=03
+export FHOUT_GFS=${FHOUT_GFS:-1}
 
 ###############################################
 # Specify Timeout Behavior of WAFS blending
@@ -82,18 +87,67 @@ export FHINC=03
 #              checking for input files
 ###############################################
 # export SLEEP_TIME=300   # changed to 60 to avoid hitting wall_clock when miss umket wafs files ... 
-export SLEEP_TIME=600
+export SLEEP_TIME=60
 export SLEEP_INT=10
+
+####################################
+# Check if this is a restart
+####################################
+if test -f $COMOUT/$RUN.t${cyc}z.control.wafsblending_0p25
+then
+  modelrecvy=`cat < $COMOUT/${RUN}.t${cyc}z.control.wafsblending_0p25`
+  recvy_pdy=`echo $modelrecvy | cut -c1-8`
+  recvy_cyc=`echo $modelrecvy | cut -c9-10`
+  recvy_shour=`echo $modelrecvy | cut -c11-`
+
+  if [ $FHOUT_GFS -eq 3 ] ; then
+      FHINC=03
+      if [ $recvy_shour -ge 48 ] ; then
+	  FHINC=06
+      fi
+  else
+      if [ $recvy_shour -lt 24 ] ; then
+	  FHINC=01
+      elif [ $recvy_shour -lt 48 ] ; then
+	  FHINC=03
+      else
+	  FHINC=06
+      fi
+  fi
+
+  # temporarily set FHINC=03. Will remove this line for 2023 ICAO standard.
+  FHINC=03
+
+  if test $RERUN = "NO"
+  then
+    if [ $recvy_shour -lt $EHOUR ]
+    then
+      new_shour=`expr $recvy_shour + $FHINC`
+    fi
+    if test $new_shour -ge $SHOUR
+    then
+      export SHOUR=$new_shour
+      if [ $SHOUR -lt 10 ]; then SHOUR=0$SHOUR; fi
+    fi
+    if test $recvy_shour -ge $EHOUR
+    then
+      msg="WAFS blending Already Completed to $EHOUR"
+      postmsg "$jlogfile" "$msg"
+    else
+      msg="Starting: PDY=$PDY cycle=t${recvy_cyc}z SHOUR=$SHOUR      ."
+      postmsg "$jlogfile" "$msg"
+    fi
+  fi
+fi
 
 ############################################
 # Execute the script.
 ############################################
-export MPIRUN=${MPIRUN:-mpirun}
-${SCRIPTSgfs}/exgfs_wafs_grib2_0p25.sh.ecf
+${SCRIPTSgfs}/exgfs_atmos_wafs_blending_0p25.sh
 export err=$?; err_chk
 
-msg="JOB $job HAS COMPLETED NORMALLY!"
-postmsg $jlogfile "$msg"
+msg="JOB $job HAS COMPLETED NORMALLY."
+postmsg "$jlogfile" "$msg"
 
 ############################################
 # print exec output
@@ -110,4 +164,3 @@ if [ $KEEPDATA != YES ] ; then
 fi
 
 date
-
