@@ -474,7 +474,7 @@ contains
 
 
   subroutine write_grib2(min,max,npt,fld,lunout,listsec1in,&
-       igdtnum,igdtlen,jgdt,ipdtnum,ipdtlen,jpdt,idrtnum,idrtlen,idrtmpl)
+       igdtnum,igdtlen,jgdt,ipdtnum,ipdtlen,jpdt,idrtnumin,idrtlen,idrtmplin)
 
 !******************************************************************
 !  prgmmr: pondeca           org: np20         date: 2006-03-03   *
@@ -533,9 +533,9 @@ contains
     integer, intent(in) :: ipdtlen
     integer, intent(in) :: jpdt(ipdtlen)
 
-    integer, intent(in) :: idrtnum
+    integer, intent(in) :: idrtnumin
     integer, intent(in) :: idrtlen
-    integer, intent(in) :: idrtmpl(idrtlen)
+    integer, intent(in) :: idrtmplin(idrtlen)
 
     integer(4), parameter :: idefnum=1
 
@@ -550,6 +550,8 @@ contains
     integer(4) :: ideflist(idefnum)     
     integer(4) :: ipdstmpl(ipdtlen)
     integer(4) :: numcoord
+    integer(4) :: idrtmpl(7)
+    integer :: idrtnum
 
     integer(4) :: ibmap
     logical*1 :: bmap(npt)
@@ -571,7 +573,7 @@ contains
     listsec1(1)=7 ! Id of orginating centre (Common Code Table C-1)
     listsec1(2)=4 !"EMC"! Id of orginating sub-centre (local table)/Table C of ON388
     ! Yali Mao, GFS master table is 25 for WAFS at 0.25 deg (US unblended data is already set to 25)
-!    listsec1(3)=25    ! GRIB Master Tables Version Number (Code Table 1.0)
+    listsec1(3)=25    ! GRIB Master Tables Version Number (Code Table 1.0)
     listsec1(4)=1    ! per Brent! GRIB Local Tables Version Number (Code Table 1.1)
     listsec1(5)=1    ! Significance of Reference Time (Code Table 1.2)
 !   listsec1(6)      ! Reference Time - Year (4 digits)
@@ -610,8 +612,8 @@ contains
     print*,'product template in new Grib file= ',ipdstmpl
 
     ! Use US unblended template 5 information (5.40)
-!!!    idrtnum=40    !Data Representation Template Number ( see Code Table 5.0 )
-!!!    call apply_template_50(min,max,jpdt(1),jpdt(2),idrtmpl)
+    idrtnum=40    !Data Representation Template Number ( see Code Table 5.0 )
+    call apply_template_50(min,max,jpdt(1),jpdt(2),idrtmpl)
 
     numcoord=0
     coordlist=0. !needed for hybrid vertical coordinate
@@ -728,13 +730,14 @@ contains
 
     ! decimal scale factor (D)
     if (ncat==19 .and. nparm==37) then ! ICESEV
-       ifield5(3) = 0
+       ifield5(3) = 2
     else if (ncat==19 .and. nparm==30) then ! EDR
        ifield5(3) = 2
     else if(ncat==3 .and. nparm==3) then ! CB base/top
-       ifield5(3) = 0
+       ifield5(2) = 14
+       ifield5(3) = 5
     else if (ncat==6 .and. nparm==25) then ! Cb ext
-       ifield5(3) = 1
+       ifield5(3) = 3
     else
        ifield5(3) = 2
     endif
@@ -745,6 +748,9 @@ contains
     ifield5(4) = 0 ! Must reset to 0
 
     ifield5(5) = 0 ! type of original field values (See Code Table 5.1)
+
+    ifield5(6) = 0
+    ifield5(7) = 255
 
     ! Rarely happens for WAFS data, just in case
     if(min == max) then
